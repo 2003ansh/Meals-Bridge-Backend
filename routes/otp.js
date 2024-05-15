@@ -2,19 +2,16 @@ const express = require("express");
 const router = express.Router();
 const { body, validationResult } = require("express-validator");
 const Otp = require("../models/Otp");
-const textflow = require("textflow.js");
-textflow.useKey(
-  "rUU6Zoo16hrHzeTULRKxseRsVZviGaNwTAbCPJUVRXPNN2gChrP2hK11R5itgq7o"
-);
+const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const Profile = require("../models/Profile");
-// Route 1: post request for otp verification using: post "http://localhost:3000/api/otp/verifyotp". login required
 
+// Route 1: POST request for OTP verification
 router.post(
   "/verifyotp",
   [
     body("phone", "Enter a valid phone number").isLength({ min: 10 }),
-    body("otp", "Enter a valid otp").isLength({ min: 4 }),
+    body("otp", "Enter a valid OTP").isLength({ min: 4 }),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -22,46 +19,32 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
     try {
-      console.log("entered verifyotp")
-      const { phone } = req.body;
-      const verifyotp = await Otp.find({ phone: phone });
-      console.log(verifyotp);
-      console.log(verifyotp[0].otp)
+      console.log("Entered verifyotp");
+      const { phone, otp } = req.body;
+      const verifyOtp = await Otp.findOne({ phone });
 
-
-      if (!verifyotp) {
-        return res.status(404).send("otp has been expired");
+      if (!verifyOtp) {
+        return res.status(404).send("OTP has expired");
       }
 
-
-      const otps = verifyotp[0].otp;
-      // console.log(req.body.otp);
-
-      if (otps === req.body.otp) {
-        
+      if (verifyOtp.otp === otp) {
         const shortUuid = `GN${uuidv4()}`;
         const oid = shortUuid.substr(0, 10);
         console.log(phone);
-        const profile = await Profile.find({ phone: phone});
-        console.log(profile);
-        if(profile!=null && profile.length>0)
-        {
-          const otpSave = await Otp.findOneAndDelete({ phone: phone });
-          res.json({ message: "otp verified", profile });
-          console.log("otp verified");
+        const profile = await Profile.findOne({ phone });
+
+        await Otp.findOneAndDelete({ phone });
+
+        if (profile) {
+          res.json({ message: "OTP verified", profile });
+          console.log("OTP verified");
+        } else {
+          res.json({ message: "OTP verified", uid: oid });
+          console.log("OTP verified");
         }
-        else{
-          const otpSave = await Otp.findOneAndDelete({ phone: phone });
-          res.json({ message: "otp verified", uid: oid});
-          console.log("otp verified");
-        }
-        
-      }
-      
-      
-      else {
-        console.log("otp not verified");
-        return res.status(404).send("otp not verified");
+      } else {
+        console.log("OTP not verified");
+        return res.status(404).send("OTP not verified");
       }
     } catch (error) {
       console.error(error.message);
@@ -70,17 +53,15 @@ router.post(
   }
 );
 
-// Route 2 for sending otp  and storing it along with number using: post "http://localhost:3000/api/otp/sendotp". login required
+// Route 2: POST request for sending OTP
 router.post(
   "/sendotp",
   [body("phone", "Enter a valid phone number").isLength({ min: 10 })],
   async (req, res) => {
     try {
-      // Extract phone number from request body
-
       const { phone } = req.body;
       console.log(phone);
-      // Check for validation errors
+
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
@@ -89,24 +70,36 @@ router.post(
       // Generate OTP
       const otp = Math.floor(100000 + Math.random() * 900000);
 
-
-      textflow.sendSMS(phone, `your otp is ${otp}`, (result) => {
-        if (result) {
-          console.log(result);
+      // Send OTP via Fast2SMS using Axios
+      const response = await axios.post(
+        "https://www.fast2sms.com/dev/bulkV2",
+        {
+          sender_id: "FSTSMS",
+          message: `Your OTP is ${otp}. It is valid for 5 minutes. Do not share your OTP with anyone.`,
+          language: "english",
+          route: "p",
+          numbers: phone,
+        },
+        {
+          headers: {
+            authorization: "eNMeFaVi5ymMEsDUwtGOEBm2tLGIwETZWNOj3c9p9jsw5ACMUeJt7p9YbTFS",
+            "Content-Type": "application/json",
+          },
         }
-      });
-      // Create new OTP document and save it to the database
-      const newOtp = new Otp({
-        phone,
-        otp,
-      });
-      const otpSave = await newOtp.save();
+      );
 
-      // Respond with the saved OTP document
-      res.json("otp sent successfully");
+      // response();
+
+      console.log(response.data);
+
+      // Save OTP to database
+      const newOtp = new Otp({ phone, otp });
+      await newOtp.save();
+
+      res.json("OTP sent successfully");
     } catch (error) {
-      console.error(error.message);
-      res.status(500).send("Internal Server Error");
+      console.error("Error sending OTP via Fast2SMS:", error.message);
+      res.status(500).send("Error sending OTP");
     }
   }
 );
